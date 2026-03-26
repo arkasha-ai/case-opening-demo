@@ -111,12 +111,12 @@ export default function CaseOpening() {
 
   const handleClick = useCallback(() => {
     if (phase === 'spinning') {
-      // Switch to opening animation from frame 0
+      // Switch to opening animation from the SAME frame — seamless transition
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       setPhase('opening')
-      frameRef.current = 0
+      // frameRef.current stays at current spin position
       lastTimeRef.current = 0
-      drawFrame(openImages, 0)
+      drawFrame(openImages, frameRef.current)
       rafRef.current = requestAnimationFrame(animate)
     } else if (phase === 'revealed') {
       // Replay — spin again
