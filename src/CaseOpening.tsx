@@ -7,14 +7,20 @@ const FRAME_SIZE = 720
 
 type Phase = 'loading' | 'spinning' | 'opening' | 'revealed'
 
-function getFrameUrl(index: number): string {
+function getSpinFrameUrl(index: number): string {
   const num = String(index).padStart(4, '0')
-  return `/frames/frame_${num}.webp`
+  return `/frames-spin/frame_${num}.webp`
+}
+
+function getOpenFrameUrl(index: number): string {
+  const num = String(index).padStart(4, '0')
+  return `/frames-open/frame_${num}.webp`
 }
 
 export default function CaseOpening() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [images, setImages] = useState<HTMLImageElement[]>([])
+  const [spinImages, setSpinImages] = useState<HTMLImageElement[]>([])
+  const [openImages, setOpenImages] = useState<HTMLImageElement[]>([])
   const [loadProgress, setLoadProgress] = useState(0)
   const [phase, setPhase] = useState<Phase>('loading')
   const frameRef = useRef(0)
@@ -22,50 +28,52 @@ export default function CaseOpening() {
   const lastTimeRef = useRef(0)
   const phaseRef = useRef<Phase>('loading')
 
-  // Keep phaseRef in sync
   useEffect(() => { phaseRef.current = phase }, [phase])
 
-  // Preload all frames
+  // Preload both frame sets
   useEffect(() => {
+    const totalToLoad = TOTAL_FRAMES * 2
     let loaded = 0
-    const imgs: HTMLImageElement[] = new Array(TOTAL_FRAMES)
+    const spins: HTMLImageElement[] = new Array(TOTAL_FRAMES)
+    const opens: HTMLImageElement[] = new Array(TOTAL_FRAMES)
     let cancelled = false
 
+    const onLoad = () => {
+      if (cancelled) return
+      loaded++
+      setLoadProgress(Math.round((loaded / totalToLoad) * 100))
+      if (loaded === totalToLoad) {
+        setSpinImages(spins)
+        setOpenImages(opens)
+      }
+    }
+
     for (let i = 1; i <= TOTAL_FRAMES; i++) {
-      const img = new Image()
-      img.src = getFrameUrl(i)
-      img.onload = () => {
-        if (cancelled) return
-        loaded++
-        imgs[i - 1] = img
-        setLoadProgress(Math.round((loaded / TOTAL_FRAMES) * 100))
-        if (loaded === TOTAL_FRAMES) {
-          setImages(imgs)
-        }
-      }
-      img.onerror = () => {
-        if (cancelled) return
-        loaded++
-        setLoadProgress(Math.round((loaded / TOTAL_FRAMES) * 100))
-      }
+      const spinImg = new Image()
+      spinImg.src = getSpinFrameUrl(i)
+      spinImg.onload = () => { spins[i - 1] = spinImg; onLoad() }
+      spinImg.onerror = onLoad
+
+      const openImg = new Image()
+      openImg.src = getOpenFrameUrl(i)
+      openImg.onload = () => { opens[i - 1] = openImg; onLoad() }
+      openImg.onerror = onLoad
     }
 
     return () => { cancelled = true }
   }, [])
 
-  // Draw a specific frame on canvas
-  const drawFrame = useCallback((index: number) => {
+  const drawFrame = useCallback((imgs: HTMLImageElement[], index: number) => {
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
-    if (!ctx || !images[index]) return
+    if (!ctx || !imgs[index]) return
     ctx.clearRect(0, 0, FRAME_SIZE, FRAME_SIZE)
-    ctx.drawImage(images[index], 0, 0, FRAME_SIZE, FRAME_SIZE)
-  }, [images])
+    ctx.drawImage(imgs[index], 0, 0, FRAME_SIZE, FRAME_SIZE)
+  }, [])
 
-  // Animation loop — spins in a loop, or plays to end on "opening"
+  // Animation loop
   const animate = useCallback((timestamp: number) => {
     if (!lastTimeRef.current) lastTimeRef.current = timestamp
-
     const elapsed = timestamp - lastTimeRef.current
 
     if (elapsed >= FRAME_DURATION) {
@@ -73,52 +81,53 @@ export default function CaseOpening() {
       frameRef.current++
 
       if (phaseRef.current === 'spinning') {
-        // Loop back to frame 0
         if (frameRef.current >= TOTAL_FRAMES) {
           frameRef.current = 0
         }
-        drawFrame(frameRef.current)
+        drawFrame(spinImages, frameRef.current)
       } else if (phaseRef.current === 'opening') {
         if (frameRef.current >= TOTAL_FRAMES) {
-          // Done — show last frame
-          drawFrame(TOTAL_FRAMES - 1)
+          drawFrame(openImages, TOTAL_FRAMES - 1)
           setPhase('revealed')
           return
         }
-        drawFrame(frameRef.current)
+        drawFrame(openImages, frameRef.current)
       }
     }
 
     rafRef.current = requestAnimationFrame(animate)
-  }, [drawFrame])
+  }, [drawFrame, spinImages, openImages])
 
-  // Start spinning as soon as images are loaded
+  // Start spinning when loaded
   useEffect(() => {
-    if (images.length === TOTAL_FRAMES && phase === 'loading') {
+    if (spinImages.length === TOTAL_FRAMES && openImages.length === TOTAL_FRAMES && phase === 'loading') {
       setPhase('spinning')
       frameRef.current = 0
       lastTimeRef.current = 0
-      drawFrame(0)
+      drawFrame(spinImages, 0)
       rafRef.current = requestAnimationFrame(animate)
     }
-  }, [images, phase, animate, drawFrame])
+  }, [spinImages, openImages, phase, animate, drawFrame])
 
-  // Handle click — switch from spinning to opening (play through to end)
   const handleClick = useCallback(() => {
     if (phase === 'spinning') {
+      // Switch to opening animation from frame 0
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
       setPhase('opening')
-      // Continue from current frame, animation loop handles the rest
+      frameRef.current = 0
+      lastTimeRef.current = 0
+      drawFrame(openImages, 0)
+      rafRef.current = requestAnimationFrame(animate)
     } else if (phase === 'revealed') {
-      // Replay — start spinning again
+      // Replay — spin again
       setPhase('spinning')
       frameRef.current = 0
       lastTimeRef.current = 0
-      drawFrame(0)
+      drawFrame(spinImages, 0)
       rafRef.current = requestAnimationFrame(animate)
     }
-  }, [phase, animate, drawFrame])
+  }, [phase, animate, drawFrame, spinImages, openImages])
 
-  // Cleanup RAF on unmount
   useEffect(() => {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
