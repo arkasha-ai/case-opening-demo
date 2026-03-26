@@ -5,7 +5,7 @@ const FPS = 24
 const FRAME_DURATION = 1000 / FPS
 const FRAME_SIZE = 720
 
-type Phase = 'loading' | 'spinning' | 'opening' | 'revealed'
+type Phase = 'loading' | 'spinning' | 'finishing-spin' | 'opening' | 'revealed'
 
 function getSpinFrameUrl(index: number): string {
   const num = String(index).padStart(4, '0')
@@ -85,6 +85,16 @@ export default function CaseOpening() {
           frameRef.current = 0
         }
         drawFrame(spinImages, frameRef.current)
+      } else if (phaseRef.current === 'finishing-spin') {
+        // Finish current spin cycle, then switch to open
+        if (frameRef.current >= TOTAL_FRAMES) {
+          // Spin cycle done — start opening from frame 0
+          setPhase('opening')
+          frameRef.current = 0
+          drawFrame(openImages, 0)
+        } else {
+          drawFrame(spinImages, frameRef.current)
+        }
       } else if (phaseRef.current === 'opening') {
         if (frameRef.current >= TOTAL_FRAMES) {
           drawFrame(openImages, TOTAL_FRAMES - 1)
@@ -111,13 +121,8 @@ export default function CaseOpening() {
 
   const handleClick = useCallback(() => {
     if (phase === 'spinning') {
-      // Switch to opening animation from the SAME frame — seamless transition
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-      setPhase('opening')
-      // frameRef.current stays at current spin position
-      lastTimeRef.current = 0
-      drawFrame(openImages, frameRef.current)
-      rafRef.current = requestAnimationFrame(animate)
+      // Finish current spin cycle, then seamlessly transition to open
+      setPhase('finishing-spin')
     } else if (phase === 'revealed') {
       // Replay — spin again
       setPhase('spinning')
@@ -175,7 +180,7 @@ export default function CaseOpening() {
             width: '100%',
             height: '100%',
             display: 'block',
-            cursor: phase === 'spinning' || phase === 'revealed' ? 'pointer' : 'default',
+            cursor: phase === 'spinning' || phase === 'revealed' ? 'pointer' : phase === 'finishing-spin' ? 'wait' : 'default',
           }}
           onClick={handleClick}
         />
