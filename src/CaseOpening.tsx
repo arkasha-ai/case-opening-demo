@@ -5,6 +5,8 @@ const FPS = 24
 const FRAME_DURATION = 1000 / FPS
 const FRAME_SIZE = 720
 
+type Phase = 'loading' | 'spinning' | 'opening' | 'revealed'
+
 function getFrameUrl(index: number): string {
   const num = String(index).padStart(4, '0')
   return `/frames/frame_${num}.webp`
@@ -14,12 +16,14 @@ export default function CaseOpening() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [images, setImages] = useState<HTMLImageElement[]>([])
   const [loadProgress, setLoadProgress] = useState(0)
-  const [isLoaded, setIsLoaded] = useState(false)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [hasPlayed, setHasPlayed] = useState(false)
+  const [phase, setPhase] = useState<Phase>('loading')
   const frameRef = useRef(0)
   const rafRef = useRef<number>(0)
   const lastTimeRef = useRef(0)
+  const phaseRef = useRef<Phase>('loading')
+
+  // Keep phaseRef in sync
+  useEffect(() => { phaseRef.current = phase }, [phase])
 
   // Preload all frames
   useEffect(() => {
@@ -37,7 +41,6 @@ export default function CaseOpening() {
         setLoadProgress(Math.round((loaded / TOTAL_FRAMES) * 100))
         if (loaded === TOTAL_FRAMES) {
           setImages(imgs)
-          setIsLoaded(true)
         }
       }
       img.onerror = () => {
@@ -59,14 +62,7 @@ export default function CaseOpening() {
     ctx.drawImage(images[index], 0, 0, FRAME_SIZE, FRAME_SIZE)
   }, [images])
 
-  // Draw first frame when loaded
-  useEffect(() => {
-    if (isLoaded && !hasPlayed) {
-      drawFrame(0)
-    }
-  }, [isLoaded, hasPlayed, drawFrame])
-
-  // Animation loop
+  // Animation loop — spins in a loop, or plays to end on "opening"
   const animate = useCallback((timestamp: number) => {
     if (!lastTimeRef.current) lastTimeRef.current = timestamp
 
@@ -76,29 +72,51 @@ export default function CaseOpening() {
       lastTimeRef.current = timestamp - (elapsed % FRAME_DURATION)
       frameRef.current++
 
-      if (frameRef.current >= TOTAL_FRAMES) {
-        // Stop on last frame
-        drawFrame(TOTAL_FRAMES - 1)
-        setIsPlaying(false)
-        setHasPlayed(true)
-        return
+      if (phaseRef.current === 'spinning') {
+        // Loop back to frame 0
+        if (frameRef.current >= TOTAL_FRAMES) {
+          frameRef.current = 0
+        }
+        drawFrame(frameRef.current)
+      } else if (phaseRef.current === 'opening') {
+        if (frameRef.current >= TOTAL_FRAMES) {
+          // Done — show last frame
+          drawFrame(TOTAL_FRAMES - 1)
+          setPhase('revealed')
+          return
+        }
+        drawFrame(frameRef.current)
       }
-
-      drawFrame(frameRef.current)
     }
 
     rafRef.current = requestAnimationFrame(animate)
   }, [drawFrame])
 
-  const startAnimation = useCallback(() => {
-    if (!isLoaded || isPlaying) return
-    frameRef.current = 0
-    lastTimeRef.current = 0
-    setIsPlaying(true)
-    setHasPlayed(false)
-    drawFrame(0)
-    rafRef.current = requestAnimationFrame(animate)
-  }, [isLoaded, isPlaying, animate, drawFrame])
+  // Start spinning as soon as images are loaded
+  useEffect(() => {
+    if (images.length === TOTAL_FRAMES && phase === 'loading') {
+      setPhase('spinning')
+      frameRef.current = 0
+      lastTimeRef.current = 0
+      drawFrame(0)
+      rafRef.current = requestAnimationFrame(animate)
+    }
+  }, [images, phase, animate, drawFrame])
+
+  // Handle click — switch from spinning to opening (play through to end)
+  const handleClick = useCallback(() => {
+    if (phase === 'spinning') {
+      setPhase('opening')
+      // Continue from current frame, animation loop handles the rest
+    } else if (phase === 'revealed') {
+      // Replay — start spinning again
+      setPhase('spinning')
+      frameRef.current = 0
+      lastTimeRef.current = 0
+      drawFrame(0)
+      rafRef.current = requestAnimationFrame(animate)
+    }
+  }, [phase, animate, drawFrame])
 
   // Cleanup RAF on unmount
   useEffect(() => {
@@ -148,13 +166,13 @@ export default function CaseOpening() {
             width: '100%',
             height: '100%',
             display: 'block',
-            cursor: isLoaded && !isPlaying ? 'pointer' : 'default',
+            cursor: phase === 'spinning' || phase === 'revealed' ? 'pointer' : 'default',
           }}
-          onClick={isLoaded && !isPlaying ? startAnimation : undefined}
+          onClick={handleClick}
         />
 
         {/* Loading overlay */}
-        {!isLoaded && (
+        {phase === 'loading' && (
           <div style={{
             position: 'absolute',
             inset: 0,
@@ -186,42 +204,33 @@ export default function CaseOpening() {
           </div>
         )}
 
-        {/* Click to play overlay */}
-        {isLoaded && !isPlaying && !hasPlayed && (
+        {/* Click hint while spinning */}
+        {phase === 'spinning' && (
           <div
             style={{
               position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(0,0,0,0.3)',
-              cursor: 'pointer',
+              bottom: 20,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              padding: '8px 20px',
+              background: 'rgba(0,0,0,0.6)',
+              backdropFilter: 'blur(8px)',
+              borderRadius: 20,
+              fontSize: '0.875rem',
+              color: 'rgba(255,255,255,0.8)',
+              pointerEvents: 'none',
+              animation: 'pulse 2s ease-in-out infinite',
             }}
-            onClick={startAnimation}
           >
-            <div style={{
-              width: 80,
-              height: 80,
-              borderRadius: '50%',
-              background: 'rgba(255,255,255,0.15)',
-              backdropFilter: 'blur(10px)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="white">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            </div>
+            Click to open!
           </div>
         )}
       </div>
 
       {/* Replay button */}
-      {hasPlayed && !isPlaying && (
+      {phase === 'revealed' && (
         <button
-          onClick={startAnimation}
+          onClick={handleClick}
           style={{
             marginTop: '1.5rem',
             padding: '0.75rem 2rem',
@@ -241,6 +250,13 @@ export default function CaseOpening() {
           Replay
         </button>
       )}
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 0.7; }
+          50% { opacity: 1; }
+        }
+      `}</style>
     </div>
   )
 }
